@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { URL } from "./constants";
+import { getApiUrl } from "./constants";
 
 import RecentSearch from "./components/RecentSearch";
 import QuestionAnswer from "./components/QuestionAnswer";
@@ -56,8 +56,24 @@ const App = () => {
     setQuestion("");
     setSelectedHistory("");
 
+    const activeApiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+    const activeModel = import.meta.env.VITE_GEMINI_MODEL || "gemini-2.5-flash";
+
+    if (!activeApiKey) {
+      setResult((prevResult) => [
+        ...prevResult,
+        { type: "q", text: activeQuestion },
+        {
+          type: "error",
+          text: ["Gemini API Key is missing. Please configure VITE_GEMINI_API_KEY in your .env file to enable chatting."],
+        },
+      ]);
+      setLoader(false);
+      return;
+    }
+
     try {
-      let response = await fetch(URL, {
+      let response = await fetch(getApiUrl(activeApiKey, activeModel), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -65,8 +81,17 @@ const App = () => {
         body: JSON.stringify(payload),
       });
 
-      response = await response.json();
-      let dataString = response.candidates[0].content.parts[0].text;
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        let errorMsg = responseData?.error?.message || `HTTP error! Status: ${response.status}`;
+        if (errorMsg.toLowerCase().includes("leaked")) {
+          errorMsg = "Your Gemini API Key has been flagged as leaked by Google and is disabled. Please configure a new API Key.";
+        }
+        throw new Error(errorMsg);
+      }
+
+      let dataString = responseData.candidates[0].content.parts[0].text;
 
       dataString = dataString.split("\n");
       dataString = dataString
@@ -92,8 +117,8 @@ const App = () => {
         ...prevResult,
         { type: "q", text: activeQuestion },
         {
-          type: "a",
-          text: ["Something went wrong while fetching the answer."],
+          type: "error",
+          text: [error.message || "Something went wrong while fetching the answer."],
         },
       ]);
       setLoader(false);
@@ -160,7 +185,7 @@ const App = () => {
         <div className="p-4 mt-auto border-t border-gray-200 dark:border-white/10">
           <select
             onChange={(event) => setDarkMode(event.target.value)}
-            className="w-full p-2 bg-transparent text-gray-800 dark:text-white rounded-lg outline-none cursor-pointer"
+            className="w-full p-2 bg-transparent text-gray-800 dark:text-white rounded-lg outline-none cursor-pointer border border-gray-200 dark:border-white/10"
             value={darkMode}
           >
             <option value="dark" className="bg-white dark:bg-[#2f2f2f] text-gray-800 dark:text-white">Dark Mode</option>
@@ -198,7 +223,11 @@ const App = () => {
             <div className="max-w-3xl mx-auto w-full px-4 pt-6 pb-4">
               <ul className="space-y-6">
                 {result.map((item, index) => (
-                  <QuestionAnswer key={index} item={item} index={index} />
+                  <QuestionAnswer
+                    key={index}
+                    item={item}
+                    index={index}
+                  />
                 ))}
               </ul>
               {loader && (
